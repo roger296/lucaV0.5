@@ -3,6 +3,12 @@
 # Luca General Ledger — VPS Installer
 # Supports: Ubuntu 20.04+, Ubuntu 22.04+, Ubuntu 24.04+, Debian 11+, Debian 12+
 # Run as root or with sudo.
+#
+# Usage (recommended — saves script first so stdin is free for prompts):
+#   curl -sSL https://raw.githubusercontent.com/roger296/luca-general-ledger/main/install.sh -o /tmp/luca-install.sh && bash /tmp/luca-install.sh
+#
+# Or pipe directly (also works — reads prompts from /dev/tty):
+#   curl -sSL https://raw.githubusercontent.com/roger296/luca-general-ledger/main/install.sh | bash
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -62,15 +68,15 @@ if [ "$AVAILABLE_GB" -lt 5 ]; then
 fi
 
 # ── Interactive configuration ─────────────────────────────────────────────────
+# All reads use </dev/tty so they work when the script is piped via curl | bash
 step "Configuration"
 echo ""
 echo -e "  Please answer a few questions to configure Luca for your company."
-echo -e "  Press ${BOLD}Enter${NC} to accept defaults shown in [brackets]."
 echo ""
 
 # Company name
 while true; do
-    read -rp "  Company name (e.g. Acme Ltd): " COMPANY_NAME
+    read -rp "  Company name (e.g. Acme Ltd): " COMPANY_NAME </dev/tty
     [ -n "$COMPANY_NAME" ] && break
     error "Company name is required."
 done
@@ -81,7 +87,7 @@ echo -e "  ${YELLOW}Important:${NC} Your domain must already point to this serve
 echo -e "  Luca will obtain an SSL certificate for this domain."
 echo ""
 while true; do
-    read -rp "  Domain name (e.g. accounts.yourcompany.com): " DOMAIN
+    read -rp "  Domain name (e.g. accounts.yourcompany.com): " DOMAIN </dev/tty
     [ -n "$DOMAIN" ] && break
     error "Domain name is required."
 done
@@ -89,7 +95,7 @@ done
 # Admin email
 echo ""
 while true; do
-    read -rp "  Admin email address: " ADMIN_EMAIL
+    read -rp "  Admin email address: " ADMIN_EMAIL </dev/tty
     [[ "$ADMIN_EMAIL" == *@* ]] && break
     error "Please enter a valid email address."
 done
@@ -97,13 +103,13 @@ done
 # Admin password
 echo ""
 while true; do
-    read -rsp "  Admin password (min 12 characters): " ADMIN_PASSWORD
+    read -rsp "  Admin password (min 12 characters): " ADMIN_PASSWORD </dev/tty
     echo ""
     if [ "${#ADMIN_PASSWORD}" -lt 12 ]; then
         error "Password must be at least 12 characters."
         continue
     fi
-    read -rsp "  Confirm password: " ADMIN_PASSWORD2
+    read -rsp "  Confirm password: " ADMIN_PASSWORD2 </dev/tty
     echo ""
     if [ "$ADMIN_PASSWORD" = "$ADMIN_PASSWORD2" ]; then
         break
@@ -114,7 +120,7 @@ done
 # SSL/Let's Encrypt email
 echo ""
 echo -e "  Let's Encrypt needs an email address for SSL certificate renewal notices."
-read -rp "  SSL notification email [$ADMIN_EMAIL]: " SSL_EMAIL
+read -rp "  SSL notification email [$ADMIN_EMAIL]: " SSL_EMAIL </dev/tty
 SSL_EMAIL="${SSL_EMAIL:-$ADMIN_EMAIL}"
 
 # Install directory
@@ -132,7 +138,7 @@ echo -e "  Admin email:      ${BOLD}$ADMIN_EMAIL${NC}"
 echo -e "  Install location: ${BOLD}$INSTALL_DIR${NC}"
 echo ""
 
-read -rp "  Proceed with installation? [Y/n]: " CONFIRM
+read -rp "  Proceed with installation? [Y/n]: " CONFIRM </dev/tty
 CONFIRM="${CONFIRM:-Y}"
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo ""
@@ -146,7 +152,6 @@ step "Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 
-# Install prerequisites
 apt-get install -y -qq \
     curl \
     git \
@@ -200,9 +205,9 @@ step "Installing Luca"
 
 if [ -d "$INSTALL_DIR" ]; then
     warn "Directory $INSTALL_DIR already exists."
-    read -rp "  Overwrite existing installation? [y/N]: " OVERWRITE
+    read -rp "  Overwrite existing installation? [y/N]: " OVERWRITE </dev/tty
+    OVERWRITE="${OVERWRITE:-N}"
     if [[ "$OVERWRITE" =~ ^[Yy]$ ]]; then
-        # Stop existing containers before removing
         if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
             cd "$INSTALL_DIR"
             docker compose down 2>/dev/null || true
@@ -217,7 +222,6 @@ fi
 git clone https://github.com/roger296/luca-general-ledger.git "$INSTALL_DIR" --quiet
 success "Application downloaded to $INSTALL_DIR"
 
-# Create logs directory
 mkdir -p "$INSTALL_DIR/logs"
 
 # ── Generate secrets and create .env ─────────────────────────────────────────
@@ -234,6 +238,7 @@ cat > "$INSTALL_DIR/.env" <<ENVEOF
 # Application
 NODE_ENV=production
 PORT=3000
+BASE_URL=https://${DOMAIN}
 
 # Security
 JWT_SECRET=${JWT_SECRET}
@@ -278,77 +283,99 @@ until docker compose exec -T db pg_isready -U gl_admin -d gl_ledger > /dev/null 
     fi
     sleep 2
 done
+success "Database is ready"
 
 info "Running database migrations..."
-docker compose run --rm api sh -c "npm run migrate"
+docker compose run --rm api sh -c "npm run migrate" 2>&1 | grep -v "^$" || true
 
 info "Seeding initial data..."
-docker compose run --rm api sh -c "npm run seed"
+docker compose run --rm api sh -c "npm run seed" 2>&1 | grep -v "^$" || true
 
 info "Starting all services..."
 docker compose up -d
 
-success "Luca is running"
+success "Luca containers are running"
 
 # ── Set admin user credentials ─────────────────────────────────────────────────
 step "Configuring admin account"
 
 info "Waiting for API to be ready..."
-RETRIES=30
-until curl -s http://localhost:3000/health > /dev/null 2>&1; do
+RETRIES=40
+until curl -sf http://localhost:3000/health > /dev/null 2>&1; do
     RETRIES=$((RETRIES - 1))
     if [ $RETRIES -eq 0 ]; then
-        error "API failed to start. Check logs with: docker compose logs api"
-        exit 1
+        warn "API health check timed out. Luca may still be starting — check logs with: docker compose logs api"
+        break
     fi
-    sleep 2
+    sleep 3
 done
 
-# Login as default admin and get token
+# Login as default admin and get token (initialise to empty string to avoid unbound variable)
+TOKEN_RESPONSE=""
 TOKEN_RESPONSE=$(curl -s -X POST http://localhost:3000/api/auth/login \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@localhost","password":"admin"}' 2>/dev/null)
+    -d '{"email":"admin@localhost","password":"admin"}' 2>/dev/null) || true
 
-TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4 || true)
 
 if [ -n "$TOKEN" ]; then
-    # Get the admin user ID
     ME=$(curl -s http://localhost:3000/api/auth/me \
-        -H "Authorization: Bearer $TOKEN" 2>/dev/null)
-    USER_ID=$(echo "$ME" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+        -H "Authorization: Bearer $TOKEN" 2>/dev/null || true)
+    USER_ID=$(echo "$ME" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
     if [ -n "$USER_ID" ]; then
-        # Update the admin display name
         curl -s -X PUT "http://localhost:3000/api/users/$USER_ID" \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"display_name\":\"System Administrator\"}" > /dev/null 2>&1
+            -d "{\"display_name\":\"System Administrator\"}" > /dev/null 2>&1 || true
 
-        # Change password
         curl -s -X POST "http://localhost:3000/api/users/$USER_ID/change-password" \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"current_password\":\"admin\",\"new_password\":\"${ADMIN_PASSWORD}\"}" > /dev/null 2>&1
+            -d "{\"current_password\":\"admin\",\"new_password\":\"${ADMIN_PASSWORD}\"}" > /dev/null 2>&1 || true
 
         success "Admin account configured"
     else
-        warn "Could not update admin account automatically. Login with admin@localhost / admin and update manually."
+        warn "Could not update admin account. Login with admin@localhost / admin and update via the web UI."
     fi
 else
-    warn "Could not configure admin account automatically. Login with admin@localhost / admin and update manually."
+    warn "Could not configure admin account. Login with admin@localhost / admin and update via the web UI."
+fi
+
+# ── Generate Claude OAuth connector ───────────────────────────────────────────
+step "Generating Claude connector credentials"
+
+CLIENT_ID=""
+CLIENT_SECRET=""
+
+if [ -n "${TOKEN:-}" ]; then
+    OAUTH_RESPONSE=""
+    OAUTH_RESPONSE=$(curl -s -X POST http://localhost:3000/api/oauth-clients \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $TOKEN" \
+        -d "{\"name\":\"Claude AI\",\"redirect_uris\":[\"https://claude.ai/\"]}" 2>/dev/null) || true
+
+    CLIENT_ID=$(echo "$OAUTH_RESPONSE" | grep -o '"client_id":"[^"]*"' | cut -d'"' -f4 || true)
+    CLIENT_SECRET=$(echo "$OAUTH_RESPONSE" | grep -o '"client_secret":"[^"]*"' | cut -d'"' -f4 || true)
+
+    if [ -n "$CLIENT_ID" ]; then
+        success "Claude connector credentials generated"
+    else
+        warn "Could not auto-generate connector credentials. Generate them from the web UI after login."
+    fi
+else
+    warn "Skipping connector generation — generate from the web UI after login."
 fi
 
 # ── Configure nginx ────────────────────────────────────────────────────────────
 step "Configuring web server"
 
-# Disable default nginx site
 rm -f /etc/nginx/sites-enabled/default
 
-# Install nginx config from template
 sed "s/DOMAIN_PLACEHOLDER/${DOMAIN}/g" "$INSTALL_DIR/nginx.conf.template" \
     > /etc/nginx/sites-available/luca
 
-# For certbot initial setup, we need an HTTP-only config first
+# Temporary HTTP-only config for certbot domain validation
 cat > /etc/nginx/sites-available/luca-temp <<NGINXEOF
 server {
     listen 80;
@@ -363,7 +390,6 @@ server {
 NGINXEOF
 
 ln -sf /etc/nginx/sites-available/luca-temp /etc/nginx/sites-enabled/luca
-
 nginx -t && systemctl reload nginx
 success "nginx configured"
 
@@ -372,6 +398,7 @@ step "Obtaining SSL certificate"
 
 info "Requesting SSL certificate for $DOMAIN from Let's Encrypt..."
 
+SSL_OK=false
 if certbot --nginx \
     --non-interactive \
     --agree-tos \
@@ -379,23 +406,24 @@ if certbot --nginx \
     --domains "$DOMAIN" \
     --redirect \
     --quiet 2>/dev/null; then
+    SSL_OK=true
+fi
 
-    # Now install the full production nginx config with SSL headers
+if [ "$SSL_OK" = true ]; then
     ln -sf /etc/nginx/sites-available/luca /etc/nginx/sites-enabled/luca
     rm -f /etc/nginx/sites-available/luca-temp
     nginx -t && systemctl reload nginx
-
     success "SSL certificate obtained and installed"
 else
     warn "SSL certificate setup failed. Your domain may not be pointing to this server yet."
-    warn "Luca is still running on HTTP at http://$DOMAIN"
-    warn "To add SSL later, run: certbot --nginx -d $DOMAIN"
+    warn "Luca is running on HTTP at http://$DOMAIN"
+    warn "To add SSL later: certbot --nginx -d $DOMAIN"
 fi
 
-# ── Set up automatic SSL renewal ──────────────────────────────────────────────
+# ── Automatic SSL renewal ──────────────────────────────────────────────────────
 (crontab -l 2>/dev/null | grep -v certbot; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
 
-# ── Set up Docker auto-start on reboot ────────────────────────────────────────
+# ── Auto-start on reboot ──────────────────────────────────────────────────────
 step "Configuring automatic startup"
 
 cat > /etc/systemd/system/luca.service <<SERVICEEOF
@@ -429,23 +457,28 @@ echo "  =========================================================="
 echo -e "${NC}"
 echo -e "  ${BOLD}Access your accounting system:${NC}"
 echo ""
-echo -e "    URL:       ${CYAN}https://$DOMAIN${NC}"
-echo -e "    Email:     ${CYAN}$ADMIN_EMAIL${NC}"
-echo -e "    Password:  (the password you entered during setup)"
+echo -e "    URL:      ${CYAN}https://$DOMAIN${NC}"
+echo -e "    Email:    ${CYAN}$ADMIN_EMAIL${NC}"
+echo -e "    Password: (the password you entered during setup)"
 echo ""
+
+if [ -n "$CLIENT_ID" ] && [ -n "$CLIENT_SECRET" ]; then
+    echo -e "  ${BOLD}Connect Claude (Customize → Connectors → Add connector):${NC}"
+    echo ""
+    echo -e "    MCP URL:       ${CYAN}https://$DOMAIN/mcp${NC}"
+    echo -e "    Client ID:     ${CYAN}$CLIENT_ID${NC}"
+    echo -e "    Client Secret: ${CYAN}$CLIENT_SECRET${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Save the Client Secret — it will not be shown again.${NC}"
+    echo -e "  ${YELLOW}You can also find these details in Luca under 'Connect Claude'.${NC}"
+    echo ""
+fi
+
 echo -e "  ${BOLD}Useful commands:${NC}"
 echo ""
-echo -e "    View logs:        ${YELLOW}cd $INSTALL_DIR && docker compose logs -f${NC}"
-echo -e "    Stop Luca:        ${YELLOW}cd $INSTALL_DIR && docker compose down${NC}"
-echo -e "    Start Luca:       ${YELLOW}cd $INSTALL_DIR && docker compose up -d${NC}"
-echo -e "    Update Luca:      ${YELLOW}cd $INSTALL_DIR && git pull && docker compose up -d --build${NC}"
+echo -e "    View logs:   ${YELLOW}cd $INSTALL_DIR && docker compose logs -f api${NC}"
+echo -e "    Restart:     ${YELLOW}cd $INSTALL_DIR && docker compose restart${NC}"
+echo -e "    Update:      ${YELLOW}cd $INSTALL_DIR && git pull && docker compose up -d --build${NC}"
 echo ""
-echo -e "  ${BOLD}Files:${NC}"
-echo ""
-echo -e "    Config:           ${YELLOW}$INSTALL_DIR/.env${NC}"
-echo -e "    nginx config:     ${YELLOW}/etc/nginx/sites-available/luca${NC}"
-echo -e "    Logs:             ${YELLOW}$INSTALL_DIR/logs/${NC}"
-echo ""
-echo -e "  ${YELLOW}Next step:${NC} Log in and run the setup wizard to configure"
-echo -e "  your chart of accounts and company profile."
+echo -e "  ${BOLD}Config file:${NC} ${YELLOW}$INSTALL_DIR/.env${NC}"
 echo ""
