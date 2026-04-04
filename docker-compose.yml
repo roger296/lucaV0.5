@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # ── PostgreSQL (GL mirror database) ────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: gl-mvp-db
+    environment:
+      POSTGRES_DB: gl_ledger
+      POSTGRES_USER: gl_admin
+      POSTGRES_PASSWORD: gl_dev_password_change_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gl_admin -d gl_ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── GL API + React frontend ─────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gl-mvp-api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://gl_admin:gl_dev_password_change_me@db:5432/gl_ledger
+      CHAIN_DIR: /data/chains
+    ports:
+      - "3000:3000"
+    volumes:
+      - chain_data:/data/chains
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: on-failure
+
+  # ── Test database (separate instance for integration tests) ─────────────────
+  db-test:
+    image: postgres:16-alpine
+    container_name: gl-mvp-db-test
+    environment:
+      POSTGRES_DB: gl_ledger_test
+      POSTGRES_USER: gl_admin
+      POSTGRES_PASSWORD: gl_test_password
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gl_admin -d gl_ledger_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
+  chain_data:
