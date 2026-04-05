@@ -148,8 +148,6 @@ usersRouter.post('/:id/change-password', async (req: Request, res: Response, nex
     }
 
     const new_hash = await bcrypt.hash(new_password, 10);
-    await updateUser(id, {} as Parameters<typeof updateUser>[1]);
-    // Direct DB update for the hash (updateUser only supports safe fields)
     const { db } = await import('../db/connection');
     await db('users').where('id', id).update({ password_hash: new_hash });
 
