@@ -16,7 +16,9 @@ export interface User {
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
-  const user = await db<User>('users').where({ email }).first();
+  const user = await db<User>('users')
+    .whereRaw('LOWER(email) = LOWER(?)', [email])
+    .first();
   return user ?? null;
 }
 

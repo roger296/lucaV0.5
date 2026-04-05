@@ -121,125 +121,154 @@ export const oauthRouter = Router();
  * Shows the login form. Claude redirects the user here.
  */
 oauthRouter.get('/authorize', async (req: Request, res: Response): Promise<void> => {
-  const {
-    client_id,
-    redirect_uri,
-    response_type,
-    state,
-    code_challenge,
-    code_challenge_method,
-    scope,
-  } = req.query as Record<string, string | undefined>;
-
-  if (response_type !== 'code') {
-    res.status(400).send('Unsupported response_type. Only "code" is supported.');
-    return;
-  }
-  if (!client_id || !redirect_uri) {
-    res.status(400).send('client_id and redirect_uri are required.');
-    return;
-  }
-
-  const client = await findOAuthClient(client_id);
-  if (!client || !client.is_active) {
-    res.status(400).send('Unknown or inactive client.');
-    return;
-  }
-
-  // Accept any https://claude.ai/* redirect URI dynamically
-  const isClaudeUri = redirect_uri.startsWith('https://claude.ai/');
-  const isRegistered = (client.redirect_uris as string[]).includes(redirect_uri);
-  if (!isClaudeUri && !isRegistered) {
-    res.status(400).send('redirect_uri not permitted for this client.');
-    return;
-  }
-
-  res.send(loginPage({
-    clientName: client.name,
-    params: {
+  try {
+    const {
       client_id,
       redirect_uri,
-      response_type: 'code',
-      ...(state ? { state } : {}),
-      ...(code_challenge ? { code_challenge } : {}),
-      ...(code_challenge_method ? { code_challenge_method } : {}),
-      ...(scope ? { scope } : {}),
-    },
-  }));
+      response_type,
+      state,
+      code_challenge,
+      code_challenge_method,
+      scope,
+    } = req.query as Record<string, string | undefined>;
+
+    if (response_type !== 'code') {
+      res.status(400).send('Unsupported response_type. Only "code" is supported.');
+      return;
+    }
+    if (!client_id || !redirect_uri) {
+      res.status(400).send('client_id and redirect_uri are required.');
+      return;
+    }
+
+    const client = await findOAuthClient(client_id);
+    if (!client || !client.is_active) {
+      res.status(400).send('Unknown or inactive client.');
+      return;
+    }
+
+    // Accept any https://claude.ai/* redirect URI dynamically
+    const isClaudeUri = redirect_uri.startsWith('https://claude.ai/');
+    const registeredUris = Array.isArray(client.redirect_uris)
+      ? client.redirect_uris as string[]
+      : [];
+    const isRegistered = registeredUris.includes(redirect_uri);
+    if (!isClaudeUri && !isRegistered) {
+      res.status(400).send('redirect_uri not permitted for this client.');
+      return;
+    }
+
+    res.send(loginPage({
+      clientName: client.name,
+      params: {
+        client_id,
+        redirect_uri,
+        response_type: 'code',
+        ...(state ? { state } : {}),
+        ...(code_challenge ? { code_challenge } : {}),
+        ...(code_challenge_method ? { code_challenge_method } : {}),
+        ...(scope ? { scope } : {}),
+      },
+    }));
+  } catch (err) {
+    console.error('[oauth] GET /authorize error:', err);
+    res.status(500).send('An internal error occurred. Please try again.');
+  }
 });
+
+// Pre-computed bcrypt hash of a random string used for timing-safe comparison
+// when a user email is not found. Must be a valid 60-char bcrypt hash.
+const DUMMY_HASH = '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234';
+
+/** Build the OAuth params object to pass back into the hidden form fields. */
+function oauthParams(body: Record<string, string | undefined>): Record<string, string> {
+  const { client_id, redirect_uri, state, code_challenge, code_challenge_method, scope } = body;
+  return {
+    ...(client_id ? { client_id } : {}),
+    ...(redirect_uri ? { redirect_uri } : {}),
+    response_type: 'code',
+    ...(state ? { state } : {}),
+    ...(code_challenge ? { code_challenge } : {}),
+    ...(code_challenge_method ? { code_challenge_method } : {}),
+    ...(scope ? { scope } : {}),
+  };
+}
 
 /**
  * POST /oauth/authorize
  * Validates login credentials, issues auth code, redirects back to client.
  */
 oauthRouter.post('/authorize', async (req: Request, res: Response): Promise<void> => {
-  const {
-    client_id,
-    redirect_uri,
-    state,
-    code_challenge,
-    code_challenge_method,
-    scope,
-    email,
-    password,
-  } = req.body as Record<string, string | undefined>;
+  try {
+    const body = req.body as Record<string, string | undefined>;
+    const { client_id, redirect_uri, state, code_challenge, code_challenge_method, scope, email, password } = body;
 
-  const client = await findOAuthClient(client_id ?? '');
-  if (!client || !client.is_active) {
-    res.status(400).send('Invalid client.');
-    return;
+    // ── Validate client ───────────────────────────────────────────────────
+    const client = await findOAuthClient(client_id ?? '');
+    if (!client || !client.is_active) {
+      res.status(400).send('Invalid or inactive client.');
+      return;
+    }
+
+    const isClaudeUri = (redirect_uri ?? '').startsWith('https://claude.ai/');
+    const registeredUris = Array.isArray(client.redirect_uris)
+      ? client.redirect_uris as string[]
+      : [];
+    const isRegistered = registeredUris.includes(redirect_uri ?? '');
+    if (!isClaudeUri && !isRegistered) {
+      res.status(400).send('redirect_uri not permitted for this client.');
+      return;
+    }
+
+    // Helper to re-show the form with an error
+    const showError = (error: string) => {
+      res.send(loginPage({ clientName: client.name, params: oauthParams(body), error }));
+    };
+
+    // ── Validate credentials ──────────────────────────────────────────────
+    if (!email?.trim() || !password) {
+      showError('Email and password are required.');
+      return;
+    }
+
+    const user = await findUserByEmail(email.trim().toLowerCase());
+    const hashToCheck = user?.password_hash ?? DUMMY_HASH;
+
+    let valid = false;
+    try {
+      valid = await bcrypt.compare(password, hashToCheck);
+    } catch {
+      // bcrypt throws on malformed hashes — treat as invalid credentials
+      valid = false;
+    }
+
+    if (!user || !valid || !user.is_active) {
+      showError('Invalid email or password.');
+      return;
+    }
+
+    // ── Issue authorization code ──────────────────────────────────────────
+    const scopes = scope ? scope.split(/[\s+]+/).filter(Boolean) : ['ledger:read', 'ledger:write'];
+
+    const code = await createAuthorizationCode({
+      clientId: client_id!,
+      userId: user.id,
+      redirectUri: redirect_uri!,
+      scopes,
+      codeChallenge: code_challenge,
+      codeChallengeMethod: code_challenge_method,
+    });
+
+    const callbackUrl = new URL(redirect_uri!);
+    callbackUrl.searchParams.set('code', code);
+    if (state) callbackUrl.searchParams.set('state', state);
+
+    res.redirect(callbackUrl.toString());
+
+  } catch (err) {
+    console.error('[oauth] POST /authorize error:', err);
+    res.status(500).send('An internal error occurred during authorisation. Please try again.');
   }
-
-  const isClaudeUri = (redirect_uri ?? '').startsWith('https://claude.ai/');
-  const isRegistered = (client.redirect_uris as string[]).includes(redirect_uri ?? '');
-  if (!isClaudeUri && !isRegistered) {
-    res.status(400).send('redirect_uri not permitted.');
-    return;
-  }
-
-  // Validate user credentials
-  if (!email || !password) {
-    res.send(loginPage({
-      clientName: client.name,
-      params: { client_id: client_id!, redirect_uri: redirect_uri!, response_type: 'code',
-                ...(state ? { state } : {}), ...(code_challenge ? { code_challenge } : {}),
-                ...(code_challenge_method ? { code_challenge_method } : {}), ...(scope ? { scope } : {}) },
-      error: 'Email and password are required.',
-    }));
-    return;
-  }
-
-  const user = await findUserByEmail(email);
-  const dummyHash = '$2b$10$dummyhashfortimingprotectionXXXXXXXXXXXXXXXXXXXXXX';
-  const hashToCheck = user?.password_hash ?? dummyHash;
-  const valid = await bcrypt.compare(password, hashToCheck);
-
-  if (!user || !valid || !user.is_active) {
-    res.send(loginPage({
-      clientName: client.name,
-      params: { client_id: client_id!, redirect_uri: redirect_uri!, response_type: 'code',
-                ...(state ? { state } : {}), ...(code_challenge ? { code_challenge } : {}),
-                ...(code_challenge_method ? { code_challenge_method } : {}), ...(scope ? { scope } : {}) },
-      error: 'Invalid email or password.',
-    }));
-    return;
-  }
-
-  // Issue authorization code
-  const code = await createAuthorizationCode({
-    clientId: client_id!,
-    userId: user.id,
-    redirectUri: redirect_uri!,
-    scopes: scope ? scope.split(' ') : ['ledger:read', 'ledger:write'],
-    codeChallenge: code_challenge,
-    codeChallengeMethod: code_challenge_method,
-  });
-
-  const callbackUrl = new URL(redirect_uri!);
-  callbackUrl.searchParams.set('code', code);
-  if (state) callbackUrl.searchParams.set('state', state);
-
-  res.redirect(callbackUrl.toString());
 });
 
 /**
