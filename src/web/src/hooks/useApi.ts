@@ -1,7 +1,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 // ---------------------------------------------------------------------------
-// useApi — generic fetch hook
+// Token helpers — read from localStorage; the AuthContext writes here
+// ---------------------------------------------------------------------------
+
+function getToken(): string | null {
+  try { return localStorage.getItem('luca_token'); } catch { return null; }
+}
+
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const token = getToken();
+  return token
+    ? { Authorization: `Bearer ${token}`, ...extra }
+    : { ...extra };
+}
+
+/** Dispatch a global event so AuthContext can clear the session and redirect. */
+function dispatchUnauthorized() {
+  window.dispatchEvent(new Event('luca:unauthorized'));
+}
+
+// ---------------------------------------------------------------------------
+// useApi — generic fetch hook (GET / auto-refresh)
 // ---------------------------------------------------------------------------
 
 export interface UseApiState<T> {
@@ -30,8 +50,16 @@ export function useApi<T>(url: string | null, options?: RequestInit): UseApiStat
     setLoading(true);
     setError(null);
 
-    fetch(url, { ...options, signal: controller.signal })
+    fetch(url, {
+      ...options,
+      headers: authHeaders(options?.headers),
+      signal: controller.signal,
+    })
       .then(async (res) => {
+        if (res.status === 401) {
+          dispatchUnauthorized();
+          throw new Error('Authentication required');
+        }
         const json = await res.json();
         if (!res.ok || !json.success) {
           throw new Error(json.error?.message ?? `HTTP ${res.status}`);
@@ -51,12 +79,20 @@ export function useApi<T>(url: string | null, options?: RequestInit): UseApiStat
   return { data, loading, error, refetch };
 }
 
-export async function apiPost<T>(url: string, body: unknown, userId = 'web-user'): Promise<T> {
+// ---------------------------------------------------------------------------
+// apiPost — authenticated POST helper
+// ---------------------------------------------------------------------------
+
+export async function apiPost<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
+  if (res.status === 401) {
+    dispatchUnauthorized();
+    throw new Error('Authentication required');
+  }
   const json = await res.json();
   if (!res.ok || !json.success) {
     throw new Error(json.error?.message ?? `HTTP ${res.status}`);
@@ -64,12 +100,40 @@ export async function apiPost<T>(url: string, body: unknown, userId = 'web-user'
   return json.data as T;
 }
 
+// ---------------------------------------------------------------------------
+// apiPut — authenticated PUT helper
+// ---------------------------------------------------------------------------
+
 export async function apiPut<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
+  if (res.status === 401) {
+    dispatchUnauthorized();
+    throw new Error('Authentication required');
+  }
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.error?.message ?? `HTTP ${res.status}`);
+  }
+  return json.data as T;
+}
+
+// ---------------------------------------------------------------------------
+// apiDelete — authenticated DELETE helper
+// ---------------------------------------------------------------------------
+
+export async function apiDelete<T>(url: string): Promise<T> {
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (res.status === 401) {
+    dispatchUnauthorized();
+    throw new Error('Authentication required');
+  }
   const json = await res.json();
   if (!res.ok || !json.success) {
     throw new Error(json.error?.message ?? `HTTP ${res.status}`);

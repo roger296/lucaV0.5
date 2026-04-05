@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useStaging } from '../hooks/useStaging';
+import { useAuth } from '../context/AuthContext';
 
 function NavItem({
   to,
@@ -44,6 +45,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { data: stagingItems } = useStaging();
   const pendingCount = stagingItems?.length ?? 0;
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
+
+  function handleLogout() {
+    logout();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <div className="app-layout">
@@ -74,18 +81,39 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         <div style={{ flex: 1 }} />
 
-        <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-          <button
-            className="btn btn-ghost"
-            style={{ width: '100%', fontSize: 12, color: '#6c757d' }}
-            onClick={() => {
-              void fetch('/api/reports/dashboard').then(() => {
-                navigate(0);
-              });
-            }}
-          >
-            ↺ Refresh
-          </button>
+        {/* Logged-in user + logout */}
+        <div style={{
+          padding: '12px 16px',
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          {user && (
+            <div style={{
+              fontSize: 11,
+              color: '#6c757d',
+              marginBottom: 8,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {user.display_name || user.email}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              className="btn btn-ghost"
+              style={{ flex: 1, fontSize: 11, color: '#6c757d' }}
+              onClick={() => navigate(0)}
+            >
+              ↺ Refresh
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ flex: 1, fontSize: 11, color: '#6c757d' }}
+              onClick={handleLogout}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </nav>
 
