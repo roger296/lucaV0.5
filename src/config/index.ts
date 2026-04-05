@@ -21,6 +21,7 @@ export const config = {
     secret: process.env['JWT_SECRET'] ?? 'dev-secret-change-me-in-production',
     expiresIn: process.env['JWT_EXPIRES_IN'] ?? '24h',
   },
+  baseUrl: process.env['BASE_URL'] ?? `http://localhost:3000`,
   dev: {
     apiKey: process.env['DEV_API_KEY'] ?? 'dev',
   },

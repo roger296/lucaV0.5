@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import { ChainWriter } from './chain/writer';
 import { ChainFileExistsError } from './chain/types';
 import { apiRouter } from './api/routes';
+import { oauthRouter, registerOAuthDiscovery } from './api/oauth';
 import { errorHandler } from './api/middleware/errors';
 import { requestIdMiddleware } from './api/middleware/request-id';
 import { config } from './config';
@@ -120,6 +121,10 @@ app.get('/api/health', async (_req, res) => {
     uptime_seconds: uptime,
   });
 });
+
+// ── OAuth routes (public — no JWT middleware) ─────────────────────────────────
+registerOAuthDiscovery(app, config.baseUrl);
+app.use('/oauth', oauthRouter);
 
 // ── API routes ───────────────────────────────────────────────────────────────
 app.use('/api', apiRouter);

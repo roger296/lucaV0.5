@@ -9,6 +9,7 @@ import { usersRouter } from './users';
 import { webhooksRouter } from './webhooks';
 import { exchangeRatesRouter } from './exchange-rates';
 import { bankRouter } from './bank';
+import { oauthClientsRouter } from './oauth-clients';
 import { authenticate } from './middleware/auth';
 
 // ---------------------------------------------------------------------------
@@ -32,3 +33,4 @@ apiRouter.use('/users', usersRouter);
 apiRouter.use('/webhooks', webhooksRouter);
 apiRouter.use('/exchange-rates', exchangeRatesRouter);
 apiRouter.use('/bank-accounts', bankRouter);
+apiRouter.use('/oauth-clients', oauthClientsRouter);

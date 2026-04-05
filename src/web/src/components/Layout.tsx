@@ -78,6 +78,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         <div className="nav-section-label">Admin</div>
         <NavItem to="/periods" icon="📅" label="Periods" />
+        <NavItem to="/cowork" icon="🔗" label="Co-Work Credentials" />
 
         <div style={{ flex: 1 }} />
 

@@ -9,6 +9,7 @@ import { ChartOfAccounts } from './pages/ChartOfAccounts';
 import { ApprovalQueue } from './pages/ApprovalQueue';
 import { TrialBalance } from './pages/TrialBalance';
 import { PeriodManagement } from './pages/PeriodManagement';
+import { CoWorkCredentials } from './pages/CoWorkCredentials';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
                   <Route path="/approvals" element={<ApprovalQueue />} />
                   <Route path="/trial-balance" element={<TrialBalance />} />
                   <Route path="/periods" element={<PeriodManagement />} />
+                  <Route path="/cowork" element={<CoWorkCredentials />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>
