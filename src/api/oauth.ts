@@ -272,18 +272,44 @@ oauthRouter.post('/authorize', async (req: Request, res: Response): Promise<void
 });
 
 /**
+ * OPTIONS /oauth/token — CORS preflight
+ * Claude's backend calls this cross-origin from their servers.
+ */
+oauthRouter.options('/token', (req: Request, res: Response): void => {
+  res
+    .set('Access-Control-Allow-Origin', req.headers.origin ?? '*')
+    .set('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    .set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    .set('Access-Control-Max-Age', '86400')
+    .status(204)
+    .end();
+});
+
+/**
  * POST /oauth/token
  * Exchanges authorization code for a Bearer access token.
+ * Accepts both application/x-www-form-urlencoded and application/json.
  */
 oauthRouter.post('/token', async (req: Request, res: Response): Promise<void> => {
-  const {
+  // Allow cross-origin calls from Claude's backend servers
+  res.set('Access-Control-Allow-Origin', req.headers.origin ?? '*');
+
+  // Support both JSON and form-encoded bodies
+  const body = req.body as Record<string, string | undefined>;
+  const grant_type = body['grant_type'];
+  const code = body['code'];
+  const redirect_uri = body['redirect_uri'];
+  const client_id = body['client_id'];
+  const client_secret = body['client_secret'];
+  const code_verifier = body['code_verifier'];
+
+  console.log('[oauth] POST /token', {
     grant_type,
-    code,
-    redirect_uri,
     client_id,
-    client_secret,
-    code_verifier,
-  } = req.body as Record<string, string | undefined>;
+    has_code: !!code,
+    has_verifier: !!code_verifier,
+    has_redirect: !!redirect_uri,
+  });
 
   if (grant_type !== 'authorization_code') {
     res.status(400).json({ error: 'unsupported_grant_type' });
@@ -309,6 +335,7 @@ oauthRouter.post('/token', async (req: Request, res: Response): Promise<void> =>
       scope: 'ledger:read ledger:write',
     });
   } catch (err) {
+    console.error('[oauth] Token exchange failed:', err);
     res.status(400).json({
       error: 'invalid_grant',
       error_description: err instanceof Error ? err.message : 'Token exchange failed',

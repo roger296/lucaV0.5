@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config';
 import { validateAccessToken } from '../engine/oauth';
 import { registerTools, type McpServer } from './tools';
 
@@ -201,14 +202,29 @@ mcpRouter.post('/', async (req: Request, res: Response): Promise<void> => {
   const authHeader = (req.headers['authorization'] as string) ?? '';
   const rawToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
 
+  // RFC 6750 §3 — WWW-Authenticate header tells Claude's client exactly where
+  // to find the authorization and token endpoints so it can complete the OAuth flow.
+  const wwwAuthenticate = [
+    `Bearer realm="${config.baseUrl}"`,
+    `scope="ledger:read ledger:write"`,
+    `resource_metadata="${config.baseUrl}/.well-known/oauth-protected-resource"`,
+  ].join(', ');
+
   if (!rawToken) {
-    res.status(401).json({ error: 'unauthorized', error_description: 'Bearer token required' });
+    console.log('[mcp] 401 — no Bearer token. User-Agent:', req.headers['user-agent']);
+    res
+      .status(401)
+      .set('WWW-Authenticate', wwwAuthenticate)
+      .json({ error: 'unauthorized', error_description: 'Bearer token required' });
     return;
   }
 
   const session = await validateAccessToken(rawToken);
   if (!session) {
-    res.status(401).json({ error: 'unauthorized', error_description: 'Invalid or expired token' });
+    res
+      .status(401)
+      .set('WWW-Authenticate', wwwAuthenticate)
+      .json({ error: 'unauthorized', error_description: 'Invalid or expired token' });
     return;
   }
 
