@@ -1,5 +1,4 @@
 # Development overrides — run with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-version: '3.8'
 
 services:
   db:
