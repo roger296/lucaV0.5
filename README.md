@@ -22,8 +22,11 @@ Luca is an AI-driven general ledger built for small and medium businesses who wa
 **Prerequisites:** A fresh Ubuntu 22.04/24.04 or Debian 11/12 VPS with your domain already pointing at its IP address.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/roger296/luca-general-ledger/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/roger296/luca-general-ledger/main/install.sh \
+  -o /tmp/luca-install.sh && sudo bash /tmp/luca-install.sh
 ```
+
+> Download the script first rather than piping directly — this ensures interactive prompts work correctly on all systems.
 
 The installer will:
 - Prompt for your company name, domain, and admin credentials
@@ -33,7 +36,9 @@ The installer will:
 - Configure systemd so Luca starts automatically on reboot
 - Generate secure random secrets for JWT and the database
 
-When complete, open your browser to `https://your-domain` and log in.
+When complete, open your browser to `https://your-domain` and log in with the credentials you entered.
+
+**After installation:** See the [Operations Guide](docs/Operations%20Guide.md) for connecting Claude, updating the server, troubleshooting, and complete reinstall procedures.
 
 ---
 
@@ -102,9 +107,19 @@ The chain file is the authoritative record. The PostgreSQL database is a mirror 
 
 ---
 
-## MCP Tools
+## MCP Tools and Claude Co-Work
 
-Luca exposes 50 MCP (Model Context Protocol) tools that allow the Luca AI agent to operate the accounting system conversationally. Tools cover the full accounting workflow: posting transactions, approving journal entries, querying the ledger, running reports, managing periods, importing bank statements, and more.
+Luca exposes 50 MCP (Model Context Protocol) tools that allow Claude to operate the accounting system conversationally. Tools cover the full accounting workflow: posting transactions, approving journal entries, querying the ledger, running reports, managing periods, importing bank statements, and more.
+
+### Connecting Claude
+
+1. Log in to your Luca instance and go to **Co-Work Credentials** (Admin section in the sidebar)
+2. Click **+ Generate credentials** to get a Client ID and Client Secret
+3. In Claude, go to **Customize → Connectors → Add connector**
+4. Enter the MCP Server URL (`https://your-domain/mcp`), Client ID, and Client Secret
+5. Click Connect — you'll be redirected to a login page, sign in with your Luca credentials
+
+The connection uses OAuth 2.0 Authorization Code flow with PKCE. See the [Operations Guide](docs/Operations%20Guide.md) for full details and troubleshooting.
 
 See the `skills/` directory for the skill definitions, and `src/mcp/tools.ts` for the tool implementations.
 
@@ -176,6 +191,7 @@ Test philosophy:
 |---|---|---|---|
 | `NODE_ENV` | Yes | `production` | Runtime environment |
 | `PORT` | No | `3000` | HTTP port the API listens on |
+| `BASE_URL` | Yes | `http://localhost:3000` | Full public URL (e.g. `https://accounts.yourcompany.com`). Used in OAuth discovery responses. |
 | `JWT_SECRET` | Yes | — | Secret key for signing JWT tokens. Generate with `openssl rand -base64 48` |
 | `JWT_EXPIRES_IN` | No | `24h` | JWT token lifetime |
 | `POSTGRES_DB` | No | `gl_ledger` | PostgreSQL database name |
