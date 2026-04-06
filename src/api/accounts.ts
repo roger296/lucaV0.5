@@ -14,18 +14,17 @@ accountsRouter.get('/', requirePermission('account:view'), async (req: Request, 
   try {
     const { period_id } = req.query as Record<string, string | undefined>;
 
+    const balanceSubquery = db('transaction_lines')
+      .select(
+        'account_code',
+        db.raw('COALESCE(SUM(debit), 0) as balance_debit'),
+        db.raw('COALESCE(SUM(credit), 0) as balance_credit'),
+      )
+      .groupBy('account_code');
+    if (period_id) balanceSubquery.where('period_id', period_id);
+
     const rows = await db('accounts')
-      .leftJoin(function (this: any) {
-        const q = db('transaction_lines')
-          .select(
-            'account_code',
-            db.raw('COALESCE(SUM(debit), 0) as balance_debit'),
-            db.raw('COALESCE(SUM(credit), 0) as balance_credit'),
-          )
-          .groupBy('account_code');
-        if (period_id) q.where('period_id', period_id);
-        this.from(q.as('bal'));
-      }, 'bal.account_code', 'accounts.code')
+      .leftJoin(balanceSubquery.as('bal'), 'bal.account_code', 'accounts.code')
       .select(
         'accounts.code',
         'accounts.name',
