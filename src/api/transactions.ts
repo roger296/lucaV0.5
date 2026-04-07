@@ -4,6 +4,7 @@ import { db } from '../db/connection';
 import { postTransaction } from '../engine/post';
 import type { CommittedResult, StagedResult, TransactionSubmission, TransactionType } from '../engine/types';
 import { requirePermission } from './middleware/authorise';
+import { getDocumentsByTransactionId } from '../engine/document-inbox';
 
 // ---------------------------------------------------------------------------
 // transactions.ts — Transaction posting and query endpoints
@@ -100,6 +101,21 @@ transactionsRouter.post('/bulk', requirePermission('transaction:post'), async (r
     next(err);
   }
 });
+
+/** GET /api/transactions/:id/documents — documents linked to this transaction */
+transactionsRouter.get(
+  '/:id/documents',
+  requirePermission('transaction:view'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params;
+      const docs = await getDocumentsByTransactionId(id!);
+      res.json({ success: true, data: docs });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 /** GET /api/transactions/:id — transaction with lines */
 transactionsRouter.get('/:id', requirePermission('transaction:view'), async (req: Request, res: Response, next: NextFunction) => {

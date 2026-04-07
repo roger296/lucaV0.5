@@ -66,6 +66,7 @@ export interface Transaction {
   data_flag: DataFlag;
   chain_sequence: number | null;
   lines?: TransactionLine[];
+  documents?: LinkedDocument[];
 }
 
 export interface StagingEntry {
@@ -101,6 +102,16 @@ export interface DashboardData {
   recent_transactions: Transaction[];
   trial_balance_summary: { total_debits: string; total_credits: string };
   transaction_counts: Array<{ transaction_type: string; count: string }>;
+}
+
+export interface LinkedDocument {
+  id: string;
+  filename: string;
+  mime_type: string | null;
+  file_size: number | null;
+  document_type: string | null;
+  processing_notes: string | null;
+  completed_at: string | null;
 }
 
 export interface ApiResponse<T> {
