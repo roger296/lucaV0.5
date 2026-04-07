@@ -11,6 +11,7 @@ import { exchangeRatesRouter } from './exchange-rates';
 import { bankRouter } from './bank';
 import { oauthClientsRouter } from './oauth-clients';
 import { authenticate } from './middleware/auth';
+import { documentsRouter } from './documents';
 
 // ---------------------------------------------------------------------------
 // routes.ts — assembles all API sub-routers under /api
@@ -34,3 +35,4 @@ apiRouter.use('/webhooks', webhooksRouter);
 apiRouter.use('/exchange-rates', exchangeRatesRouter);
 apiRouter.use('/bank-accounts', bankRouter);
 apiRouter.use('/oauth-clients', oauthClientsRouter);
+apiRouter.use('/documents', documentsRouter);

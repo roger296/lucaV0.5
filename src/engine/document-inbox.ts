@@ -214,3 +214,25 @@ export async function getInboxStatus(): Promise<InboxStatus> {
     is_active: config?.is_active ?? false,
   };
 }
+
+/**
+ * Returns all PROCESSED documents linked to a given transaction ID.
+ * Used by the API to show source documents on the Journal page.
+ */
+export async function getDocumentsByTransactionId(
+  transactionId: string,
+): Promise<InboxDocument[]> {
+  return db('inbox_documents')
+    .where('assigned_transaction_id', transactionId)
+    .where('status', 'PROCESSED')
+    .orderBy('completed_at', 'desc');
+}
+
+/**
+ * Returns a single document by its ID (any status).
+ */
+export async function getDocumentById(
+  documentId: string,
+): Promise<InboxDocument | undefined> {
+  return db('inbox_documents').where('id', documentId).first();
+}
