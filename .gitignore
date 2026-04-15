@@ -144,3 +144,11 @@ dist/
 # Environment files (contain secrets)
 .env
 .env.*
+
+# Claude Code local state (worktrees, session files, scheduled tasks, etc.)
+.claude/
+
+# Local prompt notes / scratch files used to drive Claude Code sessions
+add-*.md
+fix-*.md
+*-prompt.md
